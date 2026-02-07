@@ -14,7 +14,6 @@ logs/
 *.swp
 *.swo
 
-# 大文件排除
-*.node
-*.so
-*.dylib
+# 临时文件
+tmp/
+temp/
