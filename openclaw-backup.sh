@@ -2,6 +2,10 @@
 # OpenClaw 完整备份脚本（包含源码 + GitHub 同步）
 # 每日 21:00 自动运行
 
+# 启动 SSH agent 并添加 key（解决 cron 环境下认证问题）
+eval "$(ssh-agent -s)" > /dev/null 2>&1
+ssh-add -o > /dev/null 2>&1
+
 BACKUP_DIR=~/.openclaw/backups
 DATE=$(date +%Y%m%d_%H%M%S)
 LOG_FILE=~/.openclaw-backup.log
