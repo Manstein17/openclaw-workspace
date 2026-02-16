@@ -1,19 +1,19 @@
 #!/bin/bash
-# Daily backup script for OpenClaw
+# Simple backup script for OpenClaw (no git, just tar)
 
 set -e
 
-TIMESTAMP=$(date +"%Y-%m-%d %H%M")
+TIMESTAMP=$(date +"%Y-%m-%d_%H%M")
 
-echo "🔄 Starting OpenClaw backup..."
+echo "🔄 Starting simple backup..."
 
 BACKUP_DIR="$HOME/openclaw-backups"
 mkdir -p "$BACKUP_DIR"
 
-# Backup OpenClaw directory
+# Backup file name
 BACKUP_FILE="$BACKUP_DIR/openclaw-$TIMESTAMP.tar.gz"
 
-# Exclude large/regeneratable files
+# Create backup (exclude large/regeneratable files)
 tar -czf "$BACKUP_FILE" \
     --exclude='*.log' \
     --exclude='completions' \
@@ -28,4 +28,4 @@ echo "✅ Backed up to: $BACKUP_FILE"
 cd "$BACKUP_DIR"
 ls -t openclaw-*.tar.gz 2>/dev/null | tail -n +8 | xargs -r rm -f
 
-echo "✅ Backup complete! ($(ls -1 openclaw-*.tar.gz 2>/dev/null | wc -l) backups kept)"
+echo "✅ Backup complete! ($(ls -1 openclaw-*.tar.gz 2>/dev/null | wc -l | tr -d ' ') backups kept)"

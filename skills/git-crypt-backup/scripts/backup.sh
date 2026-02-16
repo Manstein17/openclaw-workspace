@@ -1,5 +1,5 @@
 #!/bin/bash
-# Daily backup script for OpenClaw workspace and config (git-crypt version)
+# Git-crypt backup script for OpenClaw
 
 set -e
 
@@ -33,12 +33,12 @@ backup_repo() {
     fi
 }
 
-echo "🔄 Starting OpenClaw backup (git-crypt)..."
+echo "🔄 Starting git-crypt backup..."
 
-# Backup workspace (our setup uses ~/.openclaw/workspace)
+# Backup workspace
 backup_repo "$HOME/.openclaw/workspace" "workspace"
 
-# Backup config
-backup_repo "$HOME/.openclaw" "config"
+# Backup config (using our custom backup dir)
+backup_repo "$HOME/.openclaw-backup-config" "config"
 
 echo "✅ Backup complete!"
