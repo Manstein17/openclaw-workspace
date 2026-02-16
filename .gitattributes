@@ -1,0 +1,8 @@
+SOUL.md filter=git-crypt diff=git-crypt
+USER.md filter=git-crypt diff=git-crypt
+HEARTBEAT.md filter=git-crypt diff=git-crypt
+MEMORY.md filter=git-crypt diff=git-crypt
+memory/** filter=git-crypt diff=git-crypt
+AGENTS.md filter=git-crypt diff=git-crypt
+IDENTITY.md filter=git-crypt diff=git-crypt
+credentials/** filter=git-crypt diff=git-crypt

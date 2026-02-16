@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "voice-recognition": {
+      "version": "1.0.0",
+      "installedAt": 1771230349616
+    },
+    "openclaw-backup": {
+      "version": "1.0.0",
+      "installedAt": 1771241817949
+    },
+    "git-crypt-backup": {
+      "version": "1.0.0",
+      "installedAt": 1771241820021
+    }
+  }
+}
