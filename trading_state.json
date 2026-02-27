@@ -1,0 +1,29 @@
+{
+  "cash": 3717.8599999999997,
+  "positions": {
+    "600519": {
+      "name": "\u8d35\u5dde\u8305\u53f0",
+      "shares": 2,
+      "entry": 1485.3,
+      "strategy": "MA",
+      "date": "2026-02-23"
+    },
+    "300750": {
+      "name": "\u5b81\u5fb7\u65f6\u4ee3",
+      "shares": 5,
+      "entry": 365.34,
+      "strategy": "MA",
+      "date": "2026-02-23"
+    },
+    "000858": {
+      "name": "\u4e94\u7cae\u6db2",
+      "shares": 14,
+      "entry": 106.06,
+      "strategy": "MA",
+      "date": "2026-02-23"
+    }
+  },
+  "history": [],
+  "start_date": "2026-02-23",
+  "total_value": 10000.0
+}

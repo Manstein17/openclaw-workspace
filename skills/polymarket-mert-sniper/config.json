@@ -1,0 +1,7 @@
+{
+  "max_bet_usd": 5.0,
+  "min_split": 0.4,
+  "expiry_window_mins": 3,
+  "max_split": 0.6,
+  "venue": "polymarket"
+}

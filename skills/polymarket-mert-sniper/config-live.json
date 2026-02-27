@@ -1,0 +1,8 @@
+{
+  "api_key": "019c6581-0b59-78bf-9e40-06c290170b51",
+  "max_bet_usd": 2.0,
+  "min_split": 0.50,
+  "max_split": 0.70,
+  "expiry_window_mins": 3,
+  "mode": "live"
+}

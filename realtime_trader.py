@@ -1,0 +1,463 @@
+#!/usr/bin/env python3
+"""
+专业级实时交易系统
+模拟专业交易员操作
+"""
+import time
+import logging
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+import os
+import sys
+import random
+from datetime import datetime, timedelta
+
+sys.path.insert(0, '/Users/manstein17/.openclaw/workspace')
+
+from trading_system_final import Config, DataSource
+from snowball_sim import SnowballSimulator
+from market_heat import MarketHeatAnalyzer
+from auto_policy import AutoPolicyFetcher
+from trading_journal import TradingJournal
+from weekly_analyzer import WeeklyAnalyzer
+from lean_strategies import get_all_strategies
+from fund_flow import FundFlowEstimator
+import requests
+
+class ProfessionalTrader:
+    """专业交易员系统"""
+    
+    def __init__(self, check_interval: int = 1800):
+        self.check_interval = check_interval
+        self.running = False
+        self.simulator = SnowballSimulator()
+        self.strategies = get_all_strategies()
+        
+        # 专业交易参数
+        self.max_positions = 3  # 最多3只
+        self.position_size = 0.2  # 每次20%仓位
+        self.stop_loss = -5  # 止损5%
+        self.take_profit_1 = 8  # 第一止盈8%
+        self.take_profit_2 = 15 # 第二止盈15%
+        
+        # 资金流向分析器
+        self.fund_flow = FundFlowEstimator()
+        
+    def is_market_open(self) -> bool:
+        now = datetime.now()
+        if now.weekday() >= 5: return False
+        
+        t = now.hour * 60 + now.minute
+        return (570 <= t <= 690) or (780 <= t <= 900)
+    
+    def get_next_open(self) -> str:
+        now = datetime.now()
+        if now.weekday() >= 5:
+            days = 7 - now.weekday()
+            next_day = now + timedelta(days=days)
+            return next_day.replace(hour=9, minute=30).strftime("%Y-%m-%d %H:%M")
+        
+        t = now.hour * 60 + now.minute
+        if t < 570: return now.replace(hour=9, minute=30).strftime("%Y-%m-%d %H:%M")
+        if t < 780: return now.replace(hour=13).strftime("%Y-%m-%d %H:%M")
+        if t < 900: return now.replace(hour=15).strftime("%Y-%m-%d %H:%M")
+        
+        next_day = now + timedelta(days=1)
+        while next_day.weekday() >= 5: next_day += timedelta(days=1)
+        return next_day.replace(hour=9, minute=30).strftime("%Y-%m-%d %H:%M")
+    
+    def backtest_strategy(self, df, strategy, days=60) -> float:
+        """回测策略在过去N天的表现,返回胜率"""
+        if df is None or len(df) < days + 10:
+            return None
+        try:
+            test_df = df.tail(days + 10).copy()
+            wins = 0
+            total = 0
+            for i in range(len(test_df) - 1):
+                signal = strategy.generate_signal(test_df.iloc[:i+1])
+                if signal == 1:
+                    if i + 2 < len(test_df):
+                        buy_price = test_df.iloc[i]['close']
+                        sell_price = test_df.iloc[i+1]['close']
+                        if sell_price > buy_price:
+                            wins += 1
+                        total += 1
+            if total > 0:
+                return wins / total
+            return None
+        except:
+            return None
+    
+    def check_and_sell(self, prices: dict):
+        """专业止损止盈检查"""
+        for symbol in list(self.simulator.positions.get('positions', {}).keys()):
+            if symbol not in prices: continue
+            
+            pos = self.simulator.positions['positions'][symbol]
+            current_price = prices[symbol]
+            entry_price = pos.get('avg_price', 0)
+            
+            if entry_price <= 0: continue
+            
+            pnl_pct = (current_price - entry_price) / entry_price * 100
+            
+            # 止损
+            if pnl_pct <= self.stop_loss:
+                print(f"   🛑 止损: {symbol} ({pnl_pct:.1f}%)")
+                self.simulator.sell(symbol, current_price)
+                continue
+            
+            # 止盈
+            if pnl_pct >= self.take_profit_2:
+                print(f"   🎯 止盈15%: {symbol} ({pnl_pct:.1f}%)")
+                self.simulator.sell(symbol, current_price)
+            elif pnl_pct >= self.take_profit_1:
+                print(f"   🎯 止盈8%: {symbol} ({pnl_pct:.1f}%)")
+                # 半仓止盈
+                shares = pos['shares'] // 2
+                if shares > 0:
+                    self.simulator.sell(symbol, current_price)
+    
+    def analyze_professional(self) -> list:
+        print("DEBUG: 开始专业分析...")
+        """专业级分析"""
+        print("\n" + "="*60)
+        print("📊 专业级分析...")
+        print("="*60)
+        
+        ds = DataSource()
+        
+        # 1. 市场主线判断
+        heat = MarketHeatAnalyzer()
+        heatmap = heat.get_market_heatmap()
+        main_sectors = [s['name'] for s in heatmap.get('sectors', [])[:3]]
+        
+        # 2. 政策方向
+        policy = AutoPolicyFetcher()
+        policy_sectors = policy.analyze_policy(policy.fetch_policy_news())
+        
+        # 3. 行业调整
+        sector_score = {}
+        for sector in main_sectors:
+            sector_score[sector] = 20
+        
+        for industry, infos in policy_sectors.items():
+            bullish = sum(1 for i in infos if i.get('sentiment') == '利好')
+            bearish = sum(1 for i in infos if i.get('sentiment') == '利空')
+            if bullish > bearish:
+                sector_score[industry] = sector_score.get(industry, 0) + 15
+            elif bearish > bullish:
+                sector_score[industry] = sector_score.get(industry, 0) - 15
+        
+        print(f"   主线: {main_sectors}")
+        print(f"   行业分: {sector_score}")
+        
+        # 4. 专业选股
+        results = []
+        
+        # 随机选股但优先主线
+        all_stocks = ds.get_all_stocks()
+        random.shuffle(all_stocks)
+        
+        for i, (symbol, name, industry, _, _) in enumerate(all_stocks[:800]):
+            if (i + 1) % 100 == 0:
+                print(f"   进度: {i+1}/800 | 已找到候选: {len(results)}")
+            
+            # 排除已持仓 - 使用更严格的检查
+            existing_positions = self.simulator.positions.get('positions', {})
+            if symbol in existing_positions:
+                continue
+            
+            # 额外检查：如果在今天历史中买过，也跳过
+            today = datetime.now().strftime('%Y-%m-%d')
+            for h in self.simulator.positions.get('history', []):
+                if h.get('symbol') == symbol and h.get('date', '').startswith(today):
+                    continue
+            
+            # 排除不在主线的（除非有强政策利好）
+            if industry not in main_sectors and sector_score.get(industry, 0) < 10:
+                continue
+            
+            df = ds.load_data(symbol)
+            if df is None or len(df) < 30:
+                continue
+            
+            # 技术分析
+            score = 50
+            
+            # 资金流向
+            fund_flow = self.fund_flow.get_stock_fund_flow(symbol, name)
+            fund_main = fund_flow.get('main_flow', 0) / 100000000  # 亿
+            
+            # 关键点位判断
+            ma20 = df['close'].rolling(20).mean().iloc[-1]
+            current = df['close'].iloc[-1]
+            
+            # 支撑位买入
+            if current < ma20 * 1.05:  # 接近20日均线
+                score += 15
+            
+            # 均线多头排列
+            ma5 = df['close'].rolling(5).mean().iloc[-1]
+            ma10 = df['close'].rolling(10).mean().iloc[-1]
+            if ma5 > ma10 > ma20:
+                score += 10
+            
+            # 策略信号 - 使用全部20个策略 + 回测筛选
+            buy_signals = 0
+            strategy_scores = []
+            strategy_names = []  # 记录策略名称
+            
+            for s in self.strategies:  # 全部20个策略
+                try:
+                    signal = s.generate_signal(df)
+                    if signal == 1:
+                        # 回测该策略在过去60天的表现
+                        win_rate = self.backtest_strategy(df, s)
+                        if win_rate is not None:
+                            strategy_scores.append(win_rate)
+                            strategy_names.append(s.name)  # 记录策略名称
+                            if win_rate >= 0.4:  # 40%以上胜率才计入
+                                buy_signals += 1
+                except:
+                    pass
+            
+            # 策略平均胜率作为额外加分
+            if strategy_scores:
+                avg_win_rate = sum(strategy_scores) / len(strategy_scores)
+                score += int(avg_win_rate * 20)  # 胜率*20分
+            else:
+                score += buy_signals * 5
+                avg_win_rate = 0
+            
+            # 资金流向评分
+            fund_score = self.fund_flow.get_fund_flow_score(symbol, name)
+            score += fund_score
+            
+            # 行业调整
+            score += sector_score.get(industry, 0)
+            
+            # 打印评分详情
+            if score >= 55:  # 接近门槛时打印
+                print(f"   {symbol} {name}: 基础50+支撑{15 if current < ma20 * 1.05 else 0}+均线{10 if ma5 > ma10 > ma20 else 0}+策略{buy_signals*5}+资金{fund_score}+行业{sector_score.get(industry,0)} = {score}")
+            
+            if score >= 60:
+                results.append({
+                    'symbol': symbol,
+                    'name': name,
+                    'industry': industry,
+                    'score': score,
+                    'support': current < ma20 * 1.05,
+                    'fund_flow': fund_main,
+                    'strategies': strategy_names,  # 策略名称列表
+                    'win_rate': avg_win_rate if strategy_scores else 0,  # 平均胜率
+                    'fund_score': fund_score
+                })
+        
+        # 排序
+        results.sort(key=lambda x: x['score'], reverse=True)
+        
+        # 输出Top5候选
+        if results:
+            print(f"\n📊 候选股票 (Top5):")
+            for r in results[:5]:
+                print(f"   {r['symbol']} {r['name']}: 评分{r['score']} 行业:{r.get('industry','N/A')}")
+        
+        return results[:10]
+    
+    def execute_buy(self, stock: dict):
+        """专业买入"""
+        # 检查是否已持仓
+        if stock['symbol'] in self.simulator.positions.get('positions', {}):
+            print(f"   ⏭️ 跳过 {stock['symbol']} - 已有持仓")
+            return False
+        
+        ds = DataSource()
+        df = ds.load_data(stock['symbol'])
+        if df is None: return False
+        
+        price = df['close'].iloc[-1]
+        cash = self.simulator.positions.get('cash', 100000)
+        
+        # 20%仓位
+        amount = cash * self.position_size
+        shares = int(amount / price)
+        
+        if shares <= 0: return False
+        
+        result = self.simulator.buy(stock['symbol'], stock['name'], price, shares)
+        
+        if result.get('success'):
+            # 记录详细策略信息
+            strategy_info = {
+                'score': stock.get('score', 0),
+                'strategies': stock.get('strategies', []),
+                'win_rate': stock.get('win_rate', 0),
+                'industry': stock.get('industry', 'N/A'),
+                'fund_flow': stock.get('fund_flow', 0),
+                'support': stock.get('support', False),
+                'reason': stock.get('reason', '')
+            }
+            
+            # 更新持仓记录
+            if 'positions' not in self.simulator.positions:
+                self.simulator.positions['positions'] = {}
+            self.simulator.positions['positions'][stock['symbol']]['strategy_info'] = strategy_info
+            self.simulator.save()
+            
+            print(f"\n✅ 专业买入!")
+            print(f"   股票: {stock['symbol']} {stock['name']}")
+            print(f"   价格: ¥{price}")
+            print(f"   股数: {shares}")
+            print(f"   评分: {stock['score']}")
+            print(f"   策略: {stock.get('strategies', [])}")
+            print(f"   胜率: {stock.get('win_rate', 0):.1%}")
+            print(f"   行业: {stock.get('industry', 'N/A')}")
+            
+            # 发送通知
+            status = self.simulator.get_portfolio_status()
+            self.notify_trade("买入", stock, status)
+            return True
+        return False
+    
+    def print_status(self):
+        status = self.simulator.get_portfolio_status()
+        
+        print("\n" + "="*60)
+        print(f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print("="*60)
+        print(f"💰 资产: ¥{status['total_value']:,.0f}")
+        print(f"📈 收益: ¥{status['total_profit']:,.0f} ({status['profit_pct']:+.1f}%)")
+        print(f"📦 持仓: {status['positions_count']}只")
+        
+        for sym, pos in status['positions'].items():
+            pnl = pos.get('profit', 0)
+            emoji = "🟢" if pnl >= 0 else "🔴"
+            print(f"   {sym} {pos['name'][:8]}: {pos['shares']}股 {pnl:+.1f}% {emoji}")
+        
+        # 保存日志
+        self.save_log(status)
+    
+    def save_log(self, status):
+        try:
+            journal = TradingJournal()
+            positions = {}
+            for sym, pos in status.get('positions', {}).items():
+                class P:
+                    pass
+                p = P()
+                p.name = pos.get('name', sym)
+                p.shares = pos.get('shares', 0)
+                p.entry_price = pos.get('avg_price', 0)
+                positions[sym] = p
+            
+            journal.save_daily_log([], positions, status.get('total_value', 0), status.get('cash', 0))
+            
+            # 周五周报
+            if datetime.now().weekday() == 4:
+                WeeklyAnalyzer().generate_report()
+        except:
+            pass
+    
+    def notify_trade(self, trade_type: str, stock: dict, status: dict):
+        """发送交易通知"""
+        try:
+            # Discord webhook (如果配置了)
+            webhook_url = os.getenv('DISCORD_WEBHOOK_URL', '')
+            
+            msg = f"""
+🎯 **专业交易系统交易报告**
+
+**类型**: {trade_type}
+**股票**: {stock.get('symbol')} {stock.get('name')}
+**时间**: {datetime.now().strftime('%H:%M')}
+
+💰 **账户状态**
+- 总资产: ¥{status.get('total_value', 0):,.0f}
+- 现金: ¥{status.get('cash', 0):,.0f}
+- 持仓: {len(status.get('positions', {}))}只
+"""
+            print(msg)
+            
+            # 可以在这里添加Discord/钉钉/微信通知
+            # if webhook_url:
+            #     requests.post(webhook_url, json={'content': msg})
+            
+        except Exception as e:
+            print(f"通知失败: {e}")
+    
+    def run(self):
+        self.running = True
+        
+        print("="*60)
+        print("🎯 专业交易系统启动")
+        print("="*60)
+        print("专业策略: 止损5% | 止盈8%/15% | 20%仓位 | 主线行业")
+        
+        loop = 0
+        try:
+            while self.running:
+                loop += 1
+                
+                # 非交易时间
+                if not self.is_market_open():
+                    print(f"\n⏰ 等待开盘... 下次: {self.get_next_open()}")
+                    time.sleep(60)
+                    continue
+                
+                print(f"\n[#{loop}] ✅ 开盘中...")
+                
+                # 获取最新价
+                ds = DataSource()
+                prices = {}
+                for sym in list(self.simulator.positions.get('positions', {}).keys()):
+                    df = ds.load_data(sym)
+                    if df is not None:
+                        prices[sym] = df['close'].iloc[-1]
+                
+                # 止损止盈检查
+                self.check_and_sell(prices)
+                
+                # 检查是否需要买入
+                positions = len(self.simulator.positions.get('positions', {}))
+                
+                if positions < self.max_positions:
+                    print("DEBUG: 进入买入逻辑")
+                    # 专业分析
+                    candidates = self.analyze_professional()
+                    
+                    if candidates:
+                        best = candidates[0]
+                        
+                        fund = best.get('fund_flow', 0)
+                        fund_str = f" 主力{ fund*10000:.0f}万" if fund != 0 else ""
+                        
+                        print(f"\n🎯 Top1: {best['symbol']} {best['name']} 评分:{best['score']}{fund_str}")
+                        
+                        if best['score'] >= 60:
+                            # 检查资金流向 (>=0即可)
+                            fund = self.fund_flow.get_fund_flow_score(best['symbol'], best.get('name'))
+                            if fund >= 0:
+                                self.execute_buy(best)
+                            else:
+                                print(f"   资金流出，拒绝买入")
+                        else:
+                            print(f"   评分不足，等待")
+                
+                # 状态
+                self.print_status()
+                
+                # 等待
+                print(f"\n⏳ 30分钟后继续...")
+                time.sleep(self.check_interval)
+        
+        except KeyboardInterrupt:
+            print("\n\n⏹️ 停止")
+        
+        self.print_status()
+        self.running = False
+
+
+if __name__ == "__main__":
+    trader = ProfessionalTrader()
+    trader.run()

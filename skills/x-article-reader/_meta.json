@@ -1,0 +1,7 @@
+{
+  "openclaw": {
+    "version": "1.0.0",
+    "name": "x-article-reader",
+    "description": "Read X (Twitter) article content from URL"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "lobehub-openclaw",
+  "version": "0.1.0",
+  "description": "LobeHub + OpenClaw 系统架构级整合",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "node src/index.js",
+    "build": "tsc",
+    "test": "jest"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "lobehub",
+    "openclaw",
+    "memory",
+    "automation"
+  ],
+  "author": "Manstein17",
+  "license": "MIT"
+}

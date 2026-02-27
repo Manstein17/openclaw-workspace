@@ -1,0 +1,24 @@
+node_modules/
+*.log
+.DS_Store
+completions/
+delivery-queue/
+backups/
+devices/
+tmp/
+
+# Stock data & caches
+stock_cache/
+stock_data/
+policy_cache/
+memory/archive/
+memory/daily/
+memory/projects/
+output/
+simulations/
+trading_logs/
+__pycache__/
+*.pyc
+
+# Credentials (keep in separate secure repo if needed)
+.credentials/

@@ -1,0 +1,37 @@
+{
+  "cash": 3558.5099999999993,
+  "positions": {
+    "600519": {
+      "symbol": "600519",
+      "name": "\u8d35\u5dde\u8305\u53f0",
+      "shares": 2,
+      "entry_price": 1485.3,
+      "entry_date": "2026-02-23",
+      "strategy": "MA5_10",
+      "stop_loss": 0,
+      "take_profit": 0
+    },
+    "000858": {
+      "symbol": "000858",
+      "name": "\u4e94\u7cae\u6db2",
+      "shares": 19,
+      "entry_price": 106.06,
+      "entry_date": "2026-02-23",
+      "strategy": "MA5_10",
+      "stop_loss": 0,
+      "take_profit": 0
+    },
+    "600276": {
+      "symbol": "600276",
+      "name": "\u6052\u745e\u533b\u836f",
+      "shares": 25,
+      "entry_price": 58.23,
+      "entry_date": "2026-02-23",
+      "strategy": "MA5_10",
+      "stop_loss": 0,
+      "take_profit": 0
+    }
+  },
+  "orders": [],
+  "last_update": "2026-02-25 07:22:59"
+}

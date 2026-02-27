@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "skills": {
+    "us-stock-analysis": {
+      "version": "0.1.1",
+      "installedAt": 1771328752325
+    },
+    "openclaw-security-scanner": {
+      "version": "1.0.0",
+      "installedAt": 1771328961222
+    },
+    "perplexity": {
+      "version": "1.0.0",
+      "installedAt": 1771328984009
+    },
+    "github": {
+      "version": "1.0.0",
+      "installedAt": 1771329065069
+    },
+    "simmer": {
+      "version": "1.15.3",
+      "installedAt": 1771332674293
+    },
+    "polymarket-weather-trader": {
+      "version": "1.7.7",
+      "installedAt": 1771331731652
+    },
+    "polymarket-auto-trader": {
+      "version": "1.0.1",
+      "installedAt": 1771332114761
+    },
+    "polyclaw": {
+      "version": "1.0.2",
+      "installedAt": 1771332129730
+    },
+    "polymarket-agent": {
+      "version": "1.0.2",
+      "installedAt": 1771332149109
+    },
+    "simmer-x402": {
+      "version": "1.1.1",
+      "installedAt": 1771749061032
+    },
+    "prediction-trade-journal": {
+      "version": "1.1.5",
+      "installedAt": 1771755140214
+    },
+    "polymarket-elon-tweets": {
+      "version": "1.0.4",
+      "installedAt": 1771755472684
+    },
+    "openclaw-backup": {
+      "version": "1.0.0",
+      "installedAt": 1771933689662
+    },
+    "mcporter": {
+      "version": "1.0.0",
+      "installedAt": 1771935290477
+    }
+  }
+}
