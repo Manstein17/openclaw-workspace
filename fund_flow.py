@@ -1,30 +1,75 @@
 #!/usr/bin/env python3
 """
-资金流向估算模块
-基于成交量和价格变动估算资金流向
-当东财API不可用时作为备选方案
+资金流向模块
+优先使用东财API获取真实资金流向
+估算作为备选方案
 """
 import requests
 import os
-import time
-from datetime import datetime
 
 # 禁用代理
 for k in ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY']:
     os.environ.pop(k, None)
 
 class FundFlowEstimator:
-    """基于腾讯数据估算资金流向"""
+    """资金流向获取 - 东财API优先"""
     
     def __init__(self):
         self.session = requests.Session()
         self.session.trust_env = False
-        self.cache = {}
+        self.session.headers.update({'User-Agent': 'Mozilla/5.0'})
     
-    def get_quote(self, symbol):
-        """获取实时行情"""
+    def get_eastmoney_fund_flow(self, symbol):
+        """
+        获取东财真实资金流向
+        
+        Returns:
+            dict: {
+                'main_flow': 主力净流入(万元),
+                'large_flow': 大单净流入(万元),
+                'medium_flow': 中单净流入(万元),
+                'small_flow': 小单净流入(万元),
+                'source': 'eastmoney'
+            }
+        """
         # 判断市场
-        if symbol.startswith('6'):
+        if symbol.startswith('6') or symbol.startswith('9'):
+            secid = f'1.{symbol}'  # 上海
+        else:
+            secid = f'0.{symbol}'  # 深圳
+        
+        url = 'https://push2.eastmoney.com/api/qt/stock/get'
+        params = {
+            'fltt': 2,
+            'fields': 'f43,f52,f53,f54,f55,f57,f58,f59,f60,f169,f170',
+            'secid': secid
+        }
+        
+        try:
+            r = self.session.get(url, params=params, timeout=10)
+            data = r.json()
+            
+            if data.get('data'):
+                d = data['data']
+                return {
+                    'success': True,
+                    'price': d.get('f43'),  # 最新价
+                    'main_flow': d.get('f52', 0),  # 主力净流入(万元)
+                    'large_flow': d.get('f55', 0),  # 大单净流入
+                    'medium_flow': d.get('f54', 0),  # 中单净流入
+                    'small_flow': d.get('f53', 0),  # 小单净流入
+                    'turnover': d.get('f57', 0),  # 换手率
+                    'amount': d.get('f58', 0),  # 成交额(万元)
+                    'source': 'eastmoney'
+                }
+        except Exception as e:
+            pass
+        
+        return {'success': False, 'source': 'eastmoney', 'error': str(e)}
+    
+    def get_tencent_quote(self, symbol):
+        """获取腾讯实时行情"""
+        if symbol.startswith('6') or symbol.startswith('9'):
             code = f'sh{symbol}'
         else:
             code = f'sz{symbol}'
@@ -37,102 +82,106 @@ class FundFlowEstimator:
             
             if data and 'v_' in data:
                 parts = data.split('=')[1].split('~')
-                
                 return {
                     'price': float(parts[3]),
-                    'high': float(parts[4]),
-                    'low': float(parts[5]),
-                    'volume': int(parts[6]),  # 手
-                    'amount': float(parts[7]),  # 万
-                    'open': float(parts[10]) if parts[10] else None,
-                    'pct': float(parts[3]) - float(parts[2]) if len(parts) > 3 else 0
+                    'volume': int(parts[6]),
+                    'amount': float(parts[7]),
+                    'source': 'tencent'
                 }
         except:
             pass
-        
         return None
     
     def estimate_fund_flow(self, symbol):
         """
-        估算资金流向
-        基于:
-        1. 涨跌幅方向
-        2. 成交量变化
-        3. 价格相对于开盘的位置
+        估算资金流向 (东财失败时的备选)
         """
-        quote = self.get_quote(symbol)
+        quote = self.get_tencent_quote(symbol)
         
         if not quote:
-            return {'flow': 0, 'score': 0, 'source': 'fail'}
-        
-        # 简单估算逻辑
-        # 1. 如果价格高于开盘，且成交量大 → 资金流入
-        # 2. 如果价格低于开盘，且成交量大 → 资金流出
+            return {'main_flow': 0, 'score': 0, 'source': 'fail'}
         
         price = quote['price']
         volume = quote['volume']
-        open_price = quote.get('open', price)
         
-        # 涨跌幅方向
-        direction = 1 if price >= open_price else -1
+        # 简单估算: 根据成交量估算
+        # 假设成交量大时主力流入
+        volume_level = min(volume / 100000, 2)
         
-        # 成交量等级 (假设日均10万手为中等)
-        volume_level = min(volume / 100000, 3)  # 最大3倍
+        # 估算
+        flow = volume_level * 100  # 估算值
         
-        # 估算资金流向 (单位: 万元)
-        estimated_flow = direction * volume * (price / 10) * 0.5  # 简化计算
-        
-        # 评分
-        if estimated_flow > 5000:  # 5000万
-            score = 20
-        elif estimated_flow > 1000:  # 1000万
-            score = 10
-        elif estimated_flow > 0:
-            score = 5
-        elif estimated_flow > -1000:
-            score = 0
-        else:
-            score = -10
+        # 评分: 基于成交量
+        score = min(int(volume_level * 30), 60)
         
         return {
-            'flow': estimated_flow,
+            'main_flow': flow,
             'score': score,
-            'price': price,
-            'volume': volume,
-            'direction': '流入' if direction > 0 else '流出',
             'source': 'estimate'
         }
     
-    def get_stock_fund_flow(self, symbol, name=None):
-        """获取股票资金流向 (优先使用东财，失败则估算)"""
-        # 先尝试估算
-        result = self.estimate_fund_flow(symbol)
+    def get_fund_flow(self, symbol):
+        """
+        获取资金流向 - 优先东财，备选估算
         
-        # 缓存
-        self.cache[symbol] = {
-            **result,
-            'update_time': datetime.now().strftime('%Y-%m-%d %H:%M')
-        }
+        Returns:
+            dict: {
+                'main_flow': 主力净流入(万元),
+                'score': 评分(-100到100),
+                'source': 'eastmoney' or 'estimate'
+            }
+        """
+        # 先尝试东财API
+        result = self.get_eastmoney_fund_flow(symbol)
         
-        return self.cache[symbol]
-    
-    def get_fund_flow_score(self, symbol, name=None):
-        """获取资金流向评分"""
-        result = self.get_stock_fund_flow(symbol, name)
-        return result.get('score', 0)
+        if result.get('success'):
+            main_flow = result.get('main_flow', 0)
+            
+            # 转换为评分
+            # 主力流入>1000万 -> +60分
+            # 主力流入>500万 -> +40分
+            # 主力流入>100万 -> +20分
+            # 主力流入<0 -> -20分
+            
+            if main_flow > 1000:
+                score = 60
+            elif main_flow > 500:
+                score = 40
+            elif main_flow > 100:
+                score = 20
+            elif main_flow > 0:
+                score = 10
+            else:
+                score = -20
+            
+            return {
+                'main_flow': main_flow,
+                'score': score,
+                'source': 'eastmoney',
+                'large_flow': result.get('large_flow', 0),
+                'turnover': result.get('turnover', 0)
+            }
+        
+        # 东财失败，使用估算
+        return self.estimate_fund_flow(symbol)
 
 
 # 测试
-if __name__ == "__main__":
+if __name__ == '__main__':
+    print("=== 资金流向测试 ===\n")
+    
     estimator = FundFlowEstimator()
     
-    print("=== 资金流向估算测试 ===\n")
-    
-    stocks = ['300861', '300719', '300678', '300875', '000428']
-    
-    for s in stocks:
-        result = estimator.get_stock_fund_flow(s)
-        flow = result.get('flow', 0)
-        score = result.get('score', 0)
+    for symbol in ['300861', '688613', '300715']:
+        print(f"📊 {symbol}:")
+        result = estimator.get_fund_flow(symbol)
         
-        print(f"{s}: 估算{flow/10000:.1f}万, 评分:{score}")
+        if result.get('success') or result.get('source') == 'eastmoney':
+            print(f"   主力净流入: {result.get('main_flow', 0):+.2f}万元")
+            print(f"   评分: {result.get('score', 0)}")
+            print(f"   数据源: {result.get('source')}")
+        else:
+            print(f"   估算: {result.get('main_flow'):+.0f}万元")
+            print(f"   评分: {result.get('score')}")
+            print(f"   数据源: {result.get('source')}")
+        print()

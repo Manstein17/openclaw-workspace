@@ -22,3 +22,10 @@ __pycache__/
 
 # Credentials (keep in separate secure repo if needed)
 .credentials/
+secrets.env
+*.env
+.env
+tokens
+*.key
+*.pem
+skills/Agent-Reach/

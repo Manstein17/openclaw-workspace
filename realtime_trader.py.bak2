@@ -11,11 +11,7 @@ import sys
 import sys
 sys.stdout = sys.stderr
 import random
-import glob
-import pandas as pd
-import requests
 from datetime import datetime, timedelta
-from threading import Thread
 
 sys.path.insert(0, '/Users/manstein17/.openclaw/workspace')
 
@@ -28,7 +24,7 @@ from weekly_analyzer import WeeklyAnalyzer
 from lean_strategies import get_all_strategies
 from fund_flow import FundFlowEstimator
 from realtime_news import RealtimeNewsFetcher
-from llm_analyzer import LLMStockAnalyzer
+import requests
 
 class ProfessionalTrader:
     """专业交易员系统"""
@@ -49,142 +45,7 @@ class ProfessionalTrader:
         # 资金流向分析器
         self.fund_flow = FundFlowEstimator()
         self.news_fetcher = RealtimeNewsFetcher()
-        self.llm_analyzer = LLMStockAnalyzer()
         
-        # 数据健康监测
-        self.cache_dir = os.path.expanduser('~/.openclaw/workspace/stock_cache/daily')
-        self.health_check_interval = 3600  # 1小时
-        self.last_health_check = 0
-        
-        # 禁用代理
-        self.session = requests.Session()
-        self.session.trust_env = False
-        self.session.headers.update({'User-Agent': 'Mozilla/5.0'})
-        
-    def check_data_health(self, force=False):
-        """数据健康检查 - 每6小时自动执行"""
-        now = time.time()
-        
-        # 检查是否到了6小时
-        if not force and (now - self.last_health_check) < self.health_check_interval:
-            return
-        
-        print("\n" + "="*50)
-        print("🔍 数据健康检查...")
-        print("="*50)
-        
-        self.last_health_check = now
-        
-        # 获取持仓股票
-        positions = self.simulator.positions
-        
-        # 检查持仓股票数据是否最新
-        stale_stocks = []
-        today = datetime.now().strftime('%Y-%m-%d')
-        yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-        
-        for sym in positions:
-            file_path = f'{self.cache_dir}/{sym}.csv'
-            try:
-                if os.path.exists(file_path):
-                    df = pd.read_csv(file_path)
-                    if len(df) > 0:
-                        latest = str(df.iloc[-1]['日期'])[:10]
-                        if latest not in [today, yesterday]:
-                            stale_stocks.append(sym)
-                else:
-                    stale_stocks.append(sym)
-            except:
-                stale_stocks.append(sym)
-        
-        if stale_stocks:
-            print(f"发现 {len(stale_stocks)} 只持仓股票数据不是最新: {stale_stocks}")
-            self.update_stocks(stale_stocks)
-        else:
-            print("✅ 持仓股票数据都是最新的!")
-        
-        # 全量检查所有股票数据是否最新
-        files = glob.glob(f'{self.cache_dir}/*.csv')
-        print(f"正在检查 {len(files)} 只股票数据...")
-        
-        all_stale = list(stale_stocks)  # 包含持仓中不是最新的
-        
-        for f in files:
-            sym = os.path.basename(f).replace('.csv', '')
-            if sym in positions:
-                continue  # 已经检查过了
-            
-            try:
-                df = pd.read_csv(f)
-                if len(df) > 0:
-                    latest = str(df.iloc[-1]['日期'])[:10]
-                    if latest not in [today, yesterday]:
-                        all_stale.append(sym)
-            except:
-                all_stale.append(sym)
-        
-        if all_stale:
-            print(f"发现 {len(all_stale)} 只股票数据不是最新!")
-            # 优先更新持仓，然后每批50只
-            print("开始更新非最新数据...")
-            
-            # 先更新持仓
-            portfolio_stale = [s for s in all_stale if s in positions]
-            if portfolio_stale:
-                print(f"  优先更新持仓: {portfolio_stale}")
-                self.update_stocks(portfolio_stale)
-            
-            # 然后更新其他，每批50只
-            others = [s for s in all_stale if s not in positions]
-            for i in range(0, len(others), 100):
-                batch = others[i:i+100]
-                print(f"  更新第 {i//50 + 1} 批 ({len(batch)} 只)...")
-                self.update_stocks(batch)
-                print(f"  批次完成，等待...")
-        else:
-            print("✅ 所有股票数据都是最新的!")
-        
-        print(f"发现 {len(all_stale)} 只股票数据不是最新!")
-        
-        print("✅ 数据健康检查完成!")
-    
-    def update_stocks(self, symbols):
-        """更新股票数据"""
-        for sym in symbols:
-            try:
-                url = 'https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData'
-                params = {
-                    'symbol': f'sh{sym}' if sym.startswith('6') or sym.startswith('9') else f'sz{sym}',
-                    'scale': '240', 'ma': 'no', 'datalen': '30'
-                }
-                r = self.session.get(url, params=params, timeout=10)
-                
-                if '456' not in r.text:
-                    data = r.json()
-                    if data and isinstance(data, list):
-                        records = []
-                        for i in data:
-                            try:
-                                records.append({
-                                    '日期': i['day'], '股票代码': sym,
-                                    '开盘': float(i['open']), '收盘': float(i['close']),
-                                    '最高': float(i['high']), '最低': float(i['low']),
-                                    '成交量': int(i['volume'])
-                                })
-                            except:
-                                pass
-                        if records:
-                            df = pd.DataFrame(records)
-                            df.to_csv(f'{self.cache_dir}/{sym}.csv', index=False)
-                            print(f"  ✅ 更新 {sym}")
-                else:
-                    print(f"  ⚠️ {sym} 被限速")
-                
-                time.sleep(10 + random.uniform(0, 3))
-                
-            except Exception as e:
-                print(f"  ❌ {sym} 失败: {e}")
-    
     def is_market_open(self) -> bool:
         now = datetime.now()
         if now.weekday() >= 5: return False
@@ -193,6 +54,19 @@ class ProfessionalTrader:
         return (570 <= t <= 690) or (780 <= t <= 900)
     
     def get_next_open(self) -> str:
+
+    def get_market_news(self) -> str:
+        """获取市场新闻"""
+        try:
+            news = self.news_fetcher.fetch_all()
+            if news:
+                msg = "\n📰 **市场新闻**\n"
+                for n in news[:5]:
+                    msg += f"  • {n[\title][:50]}\n"
+                return msg
+            return ""
+        except:
+            return ""
         now = datetime.now()
         if now.weekday() >= 5:
             days = 7 - now.weekday()
@@ -207,22 +81,6 @@ class ProfessionalTrader:
         next_day = now + timedelta(days=1)
         while next_day.weekday() >= 5: next_day += timedelta(days=1)
         return next_day.replace(hour=9, minute=30).strftime("%Y-%m-%d %H:%M")
-    
-    def analyze_with_llm(self, candidates: list) -> str:
-        """使用LLM分析候选股票"""
-        if not candidates or len(candidates) == 0:
-            return ""
-        
-        try:
-            print("\n🤖 LLM智能分析中...")
-            result = self.llm_analyzer.analyze_candidates(candidates)
-            
-            if result.get('success'):
-                return "\n" + "="*50 + "\n" + "🤖 LLM分析建议:\n" + result["analysis"] + "\n" + "="*50
-            else:
-                return f"\n⚠️ LLM分析失败: {result.get('error')}"
-        except Exception as e:
-            return f"\n⚠️ LLM分析异常: {e}"
     
     def backtest_strategy(self, df, strategy, days=60) -> float:
         """回测策略在过去N天的表现,返回胜率"""
@@ -315,10 +173,10 @@ class ProfessionalTrader:
         results = []
         
         # 随机选股但优先主线
-        all_stales = ds.get_all_stocks()
-        random.shuffle(all_stales)
+        all_stocks = ds.get_all_stocks()
+        random.shuffle(all_stocks)
         
-        for i, (symbol, name, industry, _, _) in enumerate(all_stales[:800]):
+        for i, (symbol, name, industry, _, _) in enumerate(all_stocks[:800]):
             if (i + 1) % 100 == 0:
                 print(f"   进度: {i+1}/800 | 已找到候选: {len(results)}")
             
@@ -345,7 +203,7 @@ class ProfessionalTrader:
             score = 50
             
             # 资金流向
-            fund_flow = self.fund_flow.get_eastmoney_fund_flow(symbol, name)
+            fund_flow = self.fund_flow.get_stock_fund_flow(symbol, name)
             fund_main = fund_flow.get('main_flow', 0) / 100000000  # 亿
             
             # 关键点位判断
@@ -585,12 +443,6 @@ class ProfessionalTrader:
                     # 专业分析
                     candidates = self.analyze_professional()
                     
-                    # LLM分析
-                    if candidates:
-                        llm_result = self.analyze_with_llm(candidates)
-                        if llm_result:
-                            print(llm_result)
-                    
                     if candidates:
                         best = candidates[0]
                         
@@ -608,9 +460,6 @@ class ProfessionalTrader:
                                 print(f"   资金流出，拒绝买入")
                         else:
                             print(f"   评分不足，等待")
-                
-                # 数据健康检查 (每6小时)
-                self.check_data_health()
                 
                 # 状态
                 self.print_status()

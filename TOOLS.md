@@ -11,9 +11,15 @@ All credentials stored in `.credentials/` (gitignored):
 
 ---
 
-## [Tool Name]
+## Python
 
-**Status:** ✅ Working | ⚠️ Issues | ❌ Not configured
+**Status:** ✅ Fixed Configuration (2026-03-01)
+
+**Issue:** Some cron jobs and scripts were calling `python` instead of `python3`, causing "command not found" errors.
+
+**Fix:** Created symlink at `~/.local/bin/python` -> `/opt/homebrew/bin/python3`
+
+**Note:** The system's venvs (~/.openclaw/workspace/venv and ~/.venv/polymarket) already have proper python symlinks.
 
 **Configuration:**
 ```

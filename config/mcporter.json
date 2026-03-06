@@ -1,14 +1,17 @@
 {
   "mcpServers": {
     "minimax-mcp": {
+      "description": "MiniMax MCP (TTS, Image, Video)",
       "command": "npx",
       "args": [
         "minimax-mcp-js"
       ],
-      "description": "MiniMax MCP (TTS, Image, Video)",
       "env": {
         "MINIMAX_API_KEY": "qs1xVHG7CpHORgV8CTfJ9IcS4gCqP3xWBjLuj10OctiMSB9c98Db_KCDIODSYstb5zQS-bvZUUq6-WczOO3te1PPtyxDseUCCGtIo_SwlMqtf8UpfLglTJs"
       }
+    },
+    "exa": {
+      "baseUrl": "https://mcp.exa.ai/mcp"
     }
   },
   "imports": []

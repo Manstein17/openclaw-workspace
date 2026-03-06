@@ -166,6 +166,12 @@ def get_client():
             sys.exit(1)
         api_key = os.environ.get("SIMMER_API_KEY")
         if not api_key:
+            # Try to read from credentials file
+            cred_file = os.path.expanduser("~/.openclaw/workspace/.credentials/simmer-api.txt")
+            if os.path.exists(cred_file):
+                with open(cred_file, "r") as f:
+                    api_key = f.read().strip()
+        if not api_key:
             print("Error: SIMMER_API_KEY environment variable not set")
             print("Get your API key from: simmer.markets/dashboard → SDK tab")
             sys.exit(1)
@@ -304,6 +310,131 @@ def execute_trade(market_id, side, amount):
         return {"error": str(e)}
 
 
+# =============================================================================
+# Local Trade Journal (JSON file)
+# =============================================================================
+
+TRADE_LOG_FILE = os.path.expanduser("~/.openclaw/workspace/trading_logs/elon_trades.json")
+
+def _ensure_trade_log_dir():
+    """Ensure the trade log directory exists."""
+    log_dir = os.path.dirname(TRADE_LOG_FILE)
+    if log_dir and not os.path.exists(log_dir):
+        os.makedirs(log_dir, exist_ok=True)
+
+def load_trade_log():
+    """Load existing trade log from JSON file."""
+    _ensure_trade_log_dir()
+    if os.path.exists(TRADE_LOG_FILE):
+        try:
+            with open(TRADE_LOG_FILE, "r") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return []
+    return []
+
+def save_trade_record(record):
+    """Save a trade record to local JSON file."""
+    _ensure_trade_log_dir()
+    trades = load_trade_log()
+    trades.append(record)
+    with open(TRADE_LOG_FILE, "w") as f:
+        json.dump(trades, f, indent=2)
+
+# =============================================================================
+# Enhanced Trade Journal with P&L Tracking
+# =============================================================================
+
+SELL_TARGETS = [
+    {"price": 0.30, "action": "提示", "reason": "30% - 初步盈利"},
+    {"price": 0.50, "action": "考虑卖出", "reason": "50% - 半仓获利"},
+    {"price": 0.70, "action": "建议卖出", "reason": "70% - 大幅盈利"},
+    {"price": 0.80, "action": "强制卖出", "reason": "80% - 止盈线"},
+    {"price": 0.90, "action": "强烈建议卖出", "reason": "90% - 接近目标"},
+]
+
+def calculate_position_pnl(position_shares, position_cost, current_price):
+    """计算持仓盈亏"""
+    if position_shares == 0 or position_cost == 0:
+        return {"current_value": 0, "pnl": 0, "pnl_percent": 0}
+    current_value = position_shares * current_price
+    pnl = current_value - position_cost
+    pnl_percent = (pnl / position_cost) * 100 if position_cost > 0 else 0
+    return {
+        "current_value": current_value,
+        "pnl": pnl,
+        "pnl_percent": pnl_percent,
+    }
+
+def check_sell_signals(bucket, current_price, shares, cost):
+    """检查是否触发卖出信号"""
+    if current_price == 0 or shares == 0:
+        return []
+    
+    pnl_info = calculate_position_pnl(shares, cost, current_price)
+    signals = []
+    
+    for target in SELL_TARGETS:
+        if current_price >= target["price"]:
+            signals.append({
+                "bucket": bucket,
+                "current_price": current_price,
+                "target_price": target["price"],
+                "action": target["action"],
+                "reason": target["reason"],
+                "shares": shares,
+                "cost": cost,
+                "current_value": pnl_info["current_value"],
+                "pnl": pnl_info["pnl"],
+                "pnl_percent": pnl_info["pnl_percent"],
+            })
+    
+    return signals
+
+def log_trade_record(
+    market_id,
+    market_question,
+    bucket_label,
+    price,
+    amount,
+    shares,
+    action="buy",
+    dry_run=True,
+    trade_id=None,
+    error=None,
+    projected_count=None,
+    current_count=None,
+    cluster_cost=None,
+    pnl=None,
+    sell_reason=None,
+    sell_price=None,
+):
+    """Log a trade (real or dry run) to local file."""
+    from datetime import datetime
+    record = {
+        "timestamp": datetime.now().isoformat(),
+        "market_id": market_id,
+        "market_question": market_question[:100] if market_question else None,
+        "bucket": bucket_label,
+        "price": price,
+        "amount_usd": amount,
+        "shares": shares,
+        "action": action,
+        "mode": "dry_run" if dry_run else "live",
+        "trade_id": trade_id,
+        "error": error,
+        "projected_count": projected_count,
+        "current_count": current_count,
+        "cluster_cost": cluster_cost,
+        "pnl": pnl,
+        # 增强字段
+        "sell_reason": sell_reason,
+        "sell_price": sell_price,
+    }
+    save_trade_record(record)
+    return record
+
+
 def execute_sell(market_id, shares):
     """Execute a sell trade with source tagging."""
     try:
@@ -326,12 +457,32 @@ def execute_sell(market_id, shares):
 def search_markets(query):
     """Search Simmer for markets matching a query."""
     try:
+        # Try the API endpoint first
         data = get_client()._request("GET", "/api/sdk/markets", params={
             "q": query, "status": "active", "limit": 100
         })
-        return data.get("markets", [])
+        markets = data.get("markets", [])
+        if markets:
+            return markets
     except Exception:
-        return []
+        pass
+    
+    # Fallback: try importing known Elon tweet events and get their markets
+    elon_events = [
+        "https://polymarket.com/event/elon-musk-of-tweets-february-27-march-6",
+        "https://polymarket.com/event/elon-musk-of-tweets-february-24-march-3",
+    ]
+    
+    all_markets = []
+    for event_url in elon_events:
+        try:
+            result = import_event(event_url)
+            if result and "markets" in result:
+                all_markets.extend(result["markets"])
+        except Exception:
+            continue
+    
+    return all_markets
 
 
 def import_event(polymarket_url):
@@ -519,6 +670,18 @@ def check_exit_opportunities(dry_run=True, use_safeguards=True):
 
             if dry_run:
                 print(f"     [DRY RUN] Would sell {shares:.1f} shares")
+                # Log dry run sell
+                log_trade_record(
+                    market_id=market_id,
+                    market_question=question,
+                    bucket_label="exit",
+                    price=current_price,
+                    amount=shares * current_price,
+                    shares=shares,
+                    action="sell",
+                    dry_run=True,
+                    pnl=pos.pnl or 0,
+                )
             else:
                 print(f"     Selling {shares:.1f} shares...")
                 result = execute_sell(market_id, shares)
@@ -526,6 +689,21 @@ def check_exit_opportunities(dry_run=True, use_safeguards=True):
                     exits_executed += 1
                     trade_id = result.get("trade_id")
                     print(f"     ✅ Sold {shares:.1f} shares @ ${current_price:.2f}")
+
+                    # Log to local file
+                    log_trade_record(
+                        market_id=market_id,
+                        market_question=question,
+                        bucket_label="exit",
+                        price=current_price,
+                        amount=shares * current_price,
+                        shares=shares,
+                        action="sell",
+                        dry_run=False,
+                        trade_id=trade_id,
+                        pnl=pos.pnl or 0,
+                    )
+
                     if trade_id and JOURNAL_AVAILABLE:
                         log_trade(
                             trade_id=trade_id,
@@ -631,7 +809,7 @@ def run_strategy(dry_run=True, positions_only=False, show_config=False,
 
     # Step 2: Search Simmer for Elon tweet markets
     log("\n📡 Searching for Elon tweet markets on Simmer...")
-    markets = search_markets("elon musk tweets")
+    markets = search_markets("tweets")
 
     # Group by event
     events = {}
@@ -723,7 +901,7 @@ def run_strategy(dry_run=True, positions_only=False, show_config=False,
                 break
 
         if not matched_stats:
-            log(f"\n  ⚠️  No XTracker data for: {event_name[:50]}")
+            log(f"\n  ⚠️  No XTracker data for: {event_name[:50] if event_name else 'Unknown'}")
             continue
 
         projected_count = matched_stats["pace"]
@@ -805,6 +983,20 @@ def run_strategy(dry_run=True, positions_only=False, show_config=False,
             if dry_run:
                 shares_est = position_size / price if price > 0 else 0
                 log(f"   [DRY RUN] {bucket_label} @ ${price:.2f} — would buy ${position_size:.2f} (~{shares_est:.0f} shares)")
+                # Log dry run to local file
+                log_trade_record(
+                    market_id=market_id,
+                    market_question=m.get("question", ""),
+                    bucket_label=bucket_label,
+                    price=price,
+                    amount=position_size,
+                    shares=shares_est,
+                    action="buy",
+                    dry_run=True,
+                    projected_count=projected_count,
+                    current_count=current_count,
+                    cluster_cost=total_cost,
+                )
             else:
                 log(f"   Buying {bucket_label} @ ${price:.2f}...", force=True)
                 result = execute_trade(market_id, "yes", position_size)
@@ -814,6 +1006,22 @@ def run_strategy(dry_run=True, positions_only=False, show_config=False,
                     shares = result.get("shares_bought") or result.get("shares") or 0
                     trade_id = result.get("trade_id")
                     log(f"   ✅ Bought {shares:.1f} shares of {bucket_label} @ ${price:.2f}", force=True)
+
+                    # Log to local file
+                    log_trade_record(
+                        market_id=market_id,
+                        market_question=m.get("question", ""),
+                        bucket_label=bucket_label,
+                        price=price,
+                        amount=position_size,
+                        shares=shares,
+                        action="buy",
+                        dry_run=False,
+                        trade_id=trade_id,
+                        projected_count=projected_count,
+                        current_count=current_count,
+                        cluster_cost=total_cost,
+                    )
 
                     if trade_id and JOURNAL_AVAILABLE:
                         log_trade(
@@ -827,6 +1035,21 @@ def run_strategy(dry_run=True, positions_only=False, show_config=False,
                         )
                 else:
                     log(f"   ❌ Trade failed: {result.get('error', 'Unknown')}", force=True)
+                    # Log failed trade
+                    log_trade_record(
+                        market_id=market_id,
+                        market_question=m.get("question", ""),
+                        bucket_label=bucket_label,
+                        price=price,
+                        amount=position_size,
+                        shares=0,
+                        action="buy",
+                        dry_run=False,
+                        error=result.get('error', 'Unknown'),
+                        projected_count=projected_count,
+                        current_count=current_count,
+                        cluster_cost=total_cost,
+                    )
 
     # Check exits
     exits_found, exits_executed = check_exit_opportunities(dry_run, use_safeguards)
@@ -862,6 +1085,9 @@ if __name__ == "__main__":
     parser.add_argument("--smart-sizing", action="store_true", help="Use portfolio-based position sizing")
     parser.add_argument("--no-safeguards", action="store_true", help="Disable context safeguards")
     parser.add_argument("--quiet", "-q", action="store_true", help="Only output on trades/errors")
+    parser.add_argument("--report", "-r", action="store_true", help="Show portfolio P&L report")
+    parser.add_argument("--analytics", "-a", action="store_true", help="Show trading analytics")
+    parser.add_argument("--status", "-s", action="store_true", help="Show full trading status (Simmer + Polymarket)")
     args = parser.parse_args()
 
     if args.set:
@@ -882,14 +1108,464 @@ if __name__ == "__main__":
             print(f"✅ Config updated: {updates}")
             print(f"   Saved to: {get_config_path(__file__)}")
 
-    dry_run = not args.live
+    # =============================================================================
+    # Enhanced: Portfolio & Analytics Commands
+    # =============================================================================
+    
+    # =============================================================================
+    # 完整交易状态报告 (Simmer + Polymarket)
+    # =============================================================================
+    
+    def get_simmer_positions():
+        """从 Simmer 获取持仓"""
+        try:
+            from simmer_sdk import SimmerClient
+            client = SimmerClient(api_key=os.environ.get("SIMMER_API_KEY", "sk_live_REDACTED"))
+            return client.get_positions()
+        except Exception as e:
+            print(f"⚠️ 获取Simmer数据失败: {e}")
+            return []
+    
+    def print_full_status_report():
+        """打印完整交易状态报告"""
+        import re
+        from datetime import datetime
+        
+        now = datetime.now()
+        
+        print("=" * 70)
+        print("🐦 ELON TWEET 交易状态报告")
+        print(f"📅 生成时间: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+        print("=" * 70)
+        
+        # ==========================================================================
+        # 第一部分: SIMMER 模拟盘
+        # ==========================================================================
+        print("\n" + "🔵 " + "=" * 66)
+        print("🔵 SIMMER 模拟盘 (Dry Run)")
+        print("=" * 70)
+        
+        try:
+            from simmer_sdk import SimmerClient
+            client = SimmerClient(api_key=os.environ.get("SIMMER_API_KEY", "sk_live_REDACTED"))
+            positions = client.get_positions()
+            
+            if not positions:
+                print("  ⏳ 暂无持仓")
+            else:
+                # 按市场分组
+                markets = {}
+                for pos in positions:
+                    q = pos.question
+                    if 'March 3 to March 10' in q:
+                        market_name = 'Mar 3-10 (进行中)'
+                    elif 'February 27 to March 6' in q:
+                        market_name = 'Feb 27-Mar 6 (已结算)'
+                    elif 'March 2 to March 4' in q:
+                        market_name = 'Mar 2-4 (已结算)'
+                    else:
+                        market_name = '其他市场'
+                    
+                    if market_name not in markets:
+                        markets[market_name] = []
+                    markets[market_name].append(pos)
+                
+                simmer_invested = 0
+                simmer_value = 0
+                simmer_pnl = 0
+                
+                for market_name, poss in markets.items():
+                    market_cost = 0
+                    market_value = 0
+                    market_pnl = 0
+                    
+                    print(f"\n  📅 {market_name}")
+                    print("  " + "-" * 66)
+                    print(f"  {'桶区间':<12} {'股数':<10} {'成本':<10} {'当前价':<10} {'当前价值':<12} {'P&L':<12}")
+                    print("  " + "-" * 66)
+                    
+                    for pos in poss:
+                        bucket = 'unknown'
+                        match = re.search(r'(\d+)-(\d+)', pos.question)
+                        if match:
+                            bucket = f"{match.group(1)}-{match.group(2)}"
+                        
+                        print(f"  {bucket:<12} {pos.shares_yes:<10.2f} ${pos.cost_basis:<9.2f} ${pos.current_price:<9.3f} ${pos.current_value:<11.2f} ${pos.pnl:<+11.2f}")
+                        
+                        market_cost += pos.cost_basis
+                        market_value += pos.current_value
+                        market_pnl += pos.pnl
+                    
+                    print("  " + "-" * 66)
+                    print(f"  {'小计':<12} {'':<10} ${market_cost:<9.2f} {'':<10} ${market_value:<11.2f} ${market_pnl:<+11.2f}")
+                    
+                    simmer_invested += market_cost
+                    simmer_value += market_value
+                    simmer_pnl += market_pnl
+                
+                print("\n  " + "=" * 66)
+                print("  💰 SIMMER 总计:")
+                print(f"     投入本金: ${simmer_invested:>10.2f}")
+                print(f"     当前价值: ${simmer_value:>10.2f}")
+                print(f"     总盈亏:   ${simmer_pnl:>+10.2f} ({simmer_pnl/simmer_invested*100:>+.1f}%)")
+                print("  " + "=" * 66)
+                
+        except Exception as e:
+            print(f"  ⚠️ 获取Simmer数据失败: {e}")
+        
+        # ==========================================================================
+        # 第二部分: POLYMARKET 实盘
+        # ==========================================================================
+        print("\n" + "🟢 " + "=" * 66)
+        print("🟢 POLYMARKET 实盘 (Real Trading)")
+        print("=" * 70)
+        
+        # 加载本地交易记录
+        local_trades = load_trades_for_analytics()
+        
+        # 筛选实盘交易
+        live_trades = [t for t in local_trades if t.get("mode") == "live" and t.get("action") == "buy"]
+        
+        if not live_trades:
+            print("  ⏳ 暂无实盘持仓")
+        else:
+            # 按市场分组
+            markets = {}
+            for t in live_trades:
+                q = t.get("market_question", "Unknown")
+                if "March 3 to March 10" in q:
+                    market_name = "Mar 3-10 (进行中)"
+                else:
+                    market_name = "其他市场"
+                
+                if market_name not in markets:
+                    markets[market_name] = []
+                markets[market_name].append(t)
+            
+            poly_invested = 0
+            poly_value = 0
+            
+            for market_name, trades in markets.items():
+                market_cost = 0
+                market_value = 0
+                
+                print(f"\n  📅 {market_name}")
+                print("  " + "-" * 66)
+                print(f"  {'桶区间':<12} {'股数':<10} {'买入价':<10} {'成本':<10} {'当前价':<10} {'当前价值':<12} {'P&L':<12}")
+                print("  " + "-" * 66)
+                
+                for t in trades:
+                    bucket = t.get("bucket", "unknown")
+                    shares = t.get("shares", 0)
+                    cost = t.get("amount_usd", 0)
+                    buy_price = t.get("price", 0)
+                    current_price = t.get("current_price", buy_price)
+                    current_val = shares * current_price
+                    pnl = current_val - cost
+                    
+                    print(f"  {bucket:<12} {shares:<10.2f} ${buy_price:<9.3f} ${cost:<9.2f} ${current_price:<9.3f} ${current_val:<11.2f} ${pnl:<+11.2f}")
+                    
+                    market_cost += cost
+                    market_value += current_val
+                
+                print("  " + "-" * 66)
+                print(f"  {'小计':<12} {'':<10} {'':<10} ${market_cost:<9.2f} {'':<10} ${market_value:<11.2f} ${market_value-market_cost:<+11.2f}")
+                
+                poly_invested += market_cost
+                poly_value += market_value
+            
+            poly_pnl = poly_value - poly_invested
+            
+            print("\n  " + "=" * 66)
+            print("  💰 POLYMARKET 总计:")
+            print(f"     投入本金: ${poly_invested:>10.2f}")
+            print(f"     当前价值: ${poly_value:>10.2f}")
+            print(f"     总盈亏:   ${poly_pnl:>+10.2f} ({poly_pnl/poly_invested*100:>+.1f}%)" if poly_invested > 0 else "     总盈亏:   $0.00")
+            print("  " + "=" * 66)
+        
+        # ==========================================================================
+        # 第三部分: 汇总
+        # ==========================================================================
+        print("\n" + "=" * 70)
+        print("📊 【总体汇总 ALL SUMMARY】")
+        print("=" * 70)
+        
+        # 计算汇总
+        try:
+            from simmer_sdk import SimmerClient
+            client = SimmerClient(api_key=os.environ.get("SIMMER_API_KEY", "sk_live_REDACTED"))
+            positions = client.get_positions()
+            simmer_invested = sum(p.cost_basis for p in positions)
+            simmer_value = sum(p.current_value for p in positions)
+        except:
+            simmer_invested = simmer_value = simmer_pnl = 0
+        
+        poly_invested = sum(t.get("amount_usd", 0) for t in local_trades if t.get("mode") == "live" and t.get("action") == "buy")
+        poly_value = sum(t.get("shares", 0) * t.get("current_price", t.get("price", 0)) for t in local_trades if t.get("mode") == "live" and t.get("action") == "buy")
+        poly_pnl = poly_value - poly_invested
+        
+        total_invested = simmer_invested + poly_invested
+        total_value = simmer_value + poly_value
+        total_pnl = simmer_pnl + poly_pnl
+        
+        # 计算百分比
+        simmer_pnl_pct = (simmer_pnl / simmer_invested * 100) if simmer_invested > 0 else 0
+        poly_pnl_pct = (poly_pnl / poly_invested * 100) if poly_invested > 0 else 0
+        total_pnl_pct = (total_pnl / total_invested * 100) if total_invested > 0 else 0
+        
+        print("""
+  +------------------------------------------------------------------+
+  |                     SIMMER 模拟盘                               |
+  +------------------------------------------------------------------+
+  |  投入本金:   ${:>10.2f}                               |
+  |  当前价值:   ${:>10.2f}                               |
+  |  总盈亏:     ${:>+10.2f}  ({:>+.1f}%)                    |
+  +------------------------------------------------------------------+
+  |                     POLYMARKET 实盘                             |
+  +------------------------------------------------------------------+
+  |  投入本金:   ${:>10.2f}                               |
+  |  当前价值:   ${:>10.2f}                               |
+  |  总盈亏:     ${:>+10.2f}  ({:>+.1f}%)                    |
+  +------------------------------------------------------------------+
+  |                        全部总计                                 |
+  +------------------------------------------------------------------+
+  |  总投入本金:   ${:>10.2f}                               |
+  |  当前总价值:   ${:>10.2f}                               |
+  |  总盈亏:       ${:>+10.2f}  ({:>+.1f}%)                    |
+  +------------------------------------------------------------------+
+        """.format(
+            simmer_invested, simmer_value, simmer_pnl, simmer_pnl_pct,
+            poly_invested, poly_value, poly_pnl, poly_pnl_pct,
+            total_invested, total_value, total_pnl, total_pnl_pct
+        ))
+        
+        # 卖出信号检查
+        print("\n🚨 卖出信号检查:")
+        print("-" * 70)
+        
+        has_signal = False
+        
+        # 检查 Polymarket 实盘
+        for t in live_trades:
+            current_price = t.get("current_price", t.get("price", 0))
+            if current_price >= 0.30:
+                has_signal = True
+                action = "强制卖出" if current_price >= 0.80 else "建议卖出" if current_price >= 0.50 else "关注"
+                print(f"  🟢 Polymarket - 桶 {t.get('bucket')}: {current_price:.0%} → {action}")
+        
+        # 检查 Simmer
+        try:
+            from simmer_sdk import SimmerClient
+            client = SimmerClient(api_key=os.environ.get("SIMMER_API_KEY", "sk_live_REDACTED"))
+            for pos in client.get_positions():
+                if pos.current_price >= 0.30:
+                    has_signal = True
+                    bucket = re.search(r'(\d+)-(\d+)', pos.question)
+                    bucket = bucket.group(0) if bucket else "unknown"
+                    action = "强制卖出" if pos.current_price >= 0.80 else "建议卖出" if pos.current_price >= 0.50 else "关注"
+                    print(f"  🔵 Simmer - 桶 {bucket}: {pos.current_price:.0%} → {action}")
+        except:
+            pass
+        
+        if not has_signal:
+            print("  ⏳ 暂无卖出信号 (所有持仓价格 < 30%)")
+        
+        print("\n" + "=" * 70)
+        print("报告生成完毕 | 使用 --status 查看完整状态")
+        print("=" * 70)
+    
+    # 加载持仓报告和分析的函数
+    def load_trades_for_analytics():
+        """加载交易记录"""
+        return load_trade_log()
+    
+    def generate_portfolio_report():
+        """生成持仓报告"""
+        trades = load_trades_for_analytics()
+        if not trades:
+            print("暂无持仓")
+            return None
+        
+        # 从信号文件获取当前价格
+        current_prices = {}
+        signal_file = os.path.expanduser("~/.openclaw/workspace/trading_logs/elon_signals.json")
+        if os.path.exists(signal_file):
+            try:
+                with open(signal_file, "r") as f:
+                    signals = json.load(f)
+                    if signals and "buckets" in signals[0]:
+                        for b in signals[0]["buckets"]:
+                            current_prices[b["bucket"]] = b["price"]
+            except:
+                pass
+        
+        # 按bucket分组计算持仓
+        position_map = {}
+        for trade in trades:
+            if trade.get("mode") == "live" and trade.get("action") == "buy":
+                bucket = trade.get("bucket")
+                if bucket not in position_map:
+                    position_map[bucket] = {"shares": 0, "cost": 0}
+                position_map[bucket]["shares"] += trade.get("shares", 0)
+                position_map[bucket]["cost"] += trade.get("amount_usd", 0)
+        
+        # 计算盈亏
+        positions = []
+        total_invested = 0
+        total_value = 0
+        
+        for bucket, pos in position_map.items():
+            if pos["shares"] > 0:
+                current_price = current_prices.get(bucket, 0)
+                current_value = pos["shares"] * current_price
+                pnl = current_value - pos["cost"]
+                pnl_pct = (pnl / pos["cost"] * 100) if pos["cost"] > 0 else 0
+                
+                positions.append({
+                    "bucket": bucket,
+                    "shares": pos["shares"],
+                    "cost": pos["cost"],
+                    "current_price": current_price,
+                    "current_value": current_value,
+                    "pnl": pnl,
+                    "pnl_percent": pnl_pct,
+                })
+                total_invested += pos["cost"]
+                total_value += current_value
+        
+        return {
+            "positions": positions,
+            "total_invested": total_invested,
+            "total_value": total_value,
+            "total_pnl": total_value - total_invested,
+            "total_pnl_percent": ((total_value - total_invested) / total_invested * 100) if total_invested > 0 else 0,
+        }
+    
+    def generate_analytics():
+        """生成分析报告"""
+        trades = load_trades_for_analytics()
+        if not trades:
+            print("暂无交易记录")
+            return None
+        
+        from datetime import datetime, timedelta
+        
+        now = datetime.now()
+        today = now.date()
+        
+        # 统计
+        stats = {
+            "total_trades": len(trades),
+            "buy_trades": 0,
+            "sell_trades": 0,
+            "dry_run": 0,
+            "live": 0,
+            "total_invested": 0,
+            "today_trades": 0,
+            "week_trades": 0,
+            "month_trades": 0,
+            "markets": set(),
+            "buckets": set(),
+        }
+        
+        for t in trades:
+            try:
+                trade_date = datetime.fromisoformat(t["timestamp"]).date()
+            except:
+                trade_date = today
+            
+            if t.get("action") == "buy":
+                stats["buy_trades"] += 1
+                if t.get("mode") == "live":
+                    stats["total_invested"] += t.get("amount_usd", 0)
+            
+            if t.get("action") == "sell":
+                stats["sell_trades"] += 1
+            
+            if t.get("mode") == "dry_run":
+                stats["dry_run"] += 1
+            else:
+                stats["live"] += 1
+            
+            if trade_date == today:
+                stats["today_trades"] += 1
+            
+            if (now - datetime.combine(trade_date, datetime.min.time())).days <= 7:
+                stats["week_trades"] += 1
+            
+            if (now - datetime.combine(trade_date, datetime.min.time())).days <= 30:
+                stats["month_trades"] += 1
+            
+            if t.get("market_question"):
+                stats["markets"].add(t["market_question"][:50])
+            if t.get("bucket"):
+                stats["buckets"].add(t["bucket"])
+        
+        stats["markets"] = len(stats["markets"])
+        stats["buckets"] = len(stats["buckets"])
+        
+        return stats
+    
+    # 处理 --report 参数
+    if hasattr(args, 'report') and args.report:
+        report = generate_portfolio_report()
+        if report:
+            print("=" * 50)
+            print("📊 Elon Tweet 持仓报告")
+            print("=" * 50)
+            
+            if report["positions"]:
+                print(f"\n{'桶区间':<12} {'股数':<8} {'成本':<8} {'当前价':<8} {'价值':<8} {'盈亏':<12}")
+                print("-" * 60)
+                for p in report["positions"]:
+                    print(f"{p['bucket']:<12} {p['shares']:<8.2f} ${p['cost']:<7.2f} ${p.get('current_price', 0):<7.2f} ${p['current_value']:<7.2f} ${p['pnl']:<+10.2f} ({p['pnl_percent']:+.1f}%)")
+                print("-" * 60)
+                print(f"总计: 投入 ${report['total_invested']:.2f} | 当前 ${report['total_value']:.2f} | 盈亏 ${report['total_pnl']:+.2f} ({report['total_pnl_percent']:+.1f}%)")
+            
+            # 检查卖出信号
+            if report["positions"]:
+                print("\n🚨 卖出信号:")
+                has_signal = False
+                for p in report["positions"]:
+                    price = p.get("current_price", 0)
+                    if price >= 0.30:
+                        has_signal = True
+                        action = "强制卖出" if price >= 0.80 else "建议卖出" if price >= 0.50 else "关注"
+                        print(f"   • 桶 {p['bucket']}: {price:.0%} → {action}")
+                if not has_signal:
+                    print("   ⏳ 暂无卖出信号 (价格 < 30%)")
+    
+    # 处理 --status 参数 (完整交易状态报告)
+    elif hasattr(args, 'status') and args.status:
+        print_full_status_report()
+    
+    # 处理 --analytics 参数
+    elif hasattr(args, 'analytics') and args.analytics:
+        stats = generate_analytics()
+        if stats:
+            print("=" * 50)
+            print("📈 Elon Tweet 交易分析")
+            print("=" * 50)
+            print(f"\n📊 总交易: {stats['total_trades']}")
+            print(f"   买入: {stats['buy_trades']} | 卖出: {stats['sell_trades']}")
+            print(f"   实盘: {stats['live']} | 模拟: {stats['dry_run']}")
+            print(f"   总投入: ${stats['total_invested']:.2f}")
+            print(f"\n📅 今日交易: {stats['today_trades']}")
+            print(f"📆 本周交易: {stats['week_trades']}")
+            print(f"📆 本月交易: {stats['month_trades']}")
+            print(f"\n🏪 涉及市场: {stats['markets']}")
+            print(f"🪣 交易桶区间: {stats['buckets']}")
+    
+    # 默认运行策略
+    else:
+        dry_run = not args.live
 
-    run_strategy(
-        dry_run=dry_run,
-        positions_only=args.positions,
-        show_config=args.config,
-        show_stats=args.stats,
-        smart_sizing=args.smart_sizing,
-        use_safeguards=not args.no_safeguards,
-        quiet=args.quiet,
-    )
+        run_strategy(
+            dry_run=dry_run,
+            positions_only=args.positions,
+            show_config=args.config,
+            show_stats=args.stats,
+            smart_sizing=args.smart_sizing,
+            use_safeguards=not args.no_safeguards,
+            quiet=args.quiet,
+        )

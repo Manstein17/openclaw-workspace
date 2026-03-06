@@ -1,0 +1,1 @@
+{"trades_today": [], "last_loss_time": null, "positions": {}, "last_optimize": "2026-03-03T23:22:00.272132", "trade_history": [], "best_params": {"max_price": 0.2, "risk_multiplier": 1.0, "win_rate": 0.7440000000000001, "recommendation": {"sweet_spot": [0.1, 0.2], "aggressive": [0.05, 0.1], "conservative": [0.2, 0.35]}}}

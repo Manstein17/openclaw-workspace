@@ -87,7 +87,7 @@ class AutoPolicyFetcher:
         try:
             last_dt = datetime.strptime(last, '%Y-%m-%d %H:%M')
             # 超过12小时抓取一次
-            if (datetime.now() - last_dt).total_seconds() > 12 * 3600:
+            if (datetime.now() - last_dt).total_seconds() > 3 * 3600:
                 return True
         except:
             return True

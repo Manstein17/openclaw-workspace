@@ -1,0 +1,67 @@
+{
+  "trades": [
+    {
+      "id": 1,
+      "timestamp": "2026-03-03T23:29:45.766238",
+      "bucket": "220-239",
+      "event": "Feb 27-Mar 6",
+      "price": 0.095,
+      "amount": 1.0,
+      "shares": 10.5,
+      "market_id": "02e17ae8-e1bc-4b63-a0aa-bcdfc33fae62",
+      "action": "buy",
+      "status": "open",
+      "pnl": null
+    },
+    {
+      "id": 2,
+      "timestamp": "2026-03-03T23:29:50.929659",
+      "bucket": "240-259",
+      "event": "Feb 27-Mar 6",
+      "price": 0.076,
+      "amount": 1.0,
+      "shares": 13.2,
+      "market_id": "db0bc8c3-a849-4ee0-b6ed-27ab5523d589",
+      "action": "buy",
+      "status": "open",
+      "pnl": null
+    }
+  ],
+  "positions": {
+    "02e17ae8-e1bc-4b63-a0aa-bcdfc33fae62": {
+      "id": 1,
+      "timestamp": "2026-03-03T23:29:45.766238",
+      "bucket": "220-239",
+      "event": "Feb 27-Mar 6",
+      "price": 0.095,
+      "amount": 1.0,
+      "shares": 10.5,
+      "market_id": "02e17ae8-e1bc-4b63-a0aa-bcdfc33fae62",
+      "action": "buy",
+      "status": "open",
+      "pnl": null,
+      "current_price": 0.0915,
+      "unrealized_pnl": -0.03925000000000001
+    },
+    "db0bc8c3-a849-4ee0-b6ed-27ab5523d589": {
+      "id": 2,
+      "timestamp": "2026-03-03T23:29:50.929659",
+      "bucket": "240-259",
+      "event": "Feb 27-Mar 6",
+      "price": 0.076,
+      "amount": 1.0,
+      "shares": 13.2,
+      "market_id": "db0bc8c3-a849-4ee0-b6ed-27ab5523d589",
+      "action": "buy",
+      "status": "open",
+      "pnl": null,
+      "current_price": 0.043,
+      "unrealized_pnl": -0.4324000000000001
+    }
+  },
+  "stats": {
+    "total_trades": 2,
+    "winning_trades": 0,
+    "total_pnl": 0
+  }
+}
