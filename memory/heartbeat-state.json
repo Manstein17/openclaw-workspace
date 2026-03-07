@@ -1,5 +1,5 @@
 {
-  "last_check": "2026-03-06T23:33:00+08:00",
+  "last_check": "2026-03-07T23:31:00+08:00",
   "status": "healthy",
-  "notes": "Late night check - backup from 10:34 today, Gateway running, no issues"
+  "notes": "Telegram OK, Discord intent issue known, one cron job in backoff (not urgent)"
 }
